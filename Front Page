@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pentagram Symbol</title>
+    <style>
+        body {
+            background-color: white;
+            color: black;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            text-align: center;
+        }
+        .container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            flex-direction: column;
+        }
+        svg {
+            width: 150px;
+            height: 150px;
+        }
+        footer {
+            margin-top: 20px;
+            color: black;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Pentagram Symbol</h1>
+
+        <!-- Black Pentagram SVG -->
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+            <!-- Pentagon Shape (Star) -->
+            <polygon points="50,10 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35" fill="none" stroke="black" stroke-width="2"/>
+        </svg>
+        
+        <footer>
+            <p>&copy; 2024 My Pentagram Page</p>
+        </footer>
+    </div>
+
+</body>
+</html>
