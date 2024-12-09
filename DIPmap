@@ -6,43 +6,52 @@ import socket
 import requests
 import time
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
-# Set up logging configuration
+# Logging configuration
 logging.basicConfig(filename="dipmap_errors.log", level=logging.ERROR, format="%(asctime)s - %(message)s")
 
-# Function to log errors
+# Predefined port lists
+DEFAULT_PORTS = [80, 443, 8080, 8443]
+QUICK_SCAN_PORTS = [21, 22, 80, 443]
+
 def log_error(error_message):
+    """Log errors to a file."""
     logging.error(error_message)
 
-# Function to validate and parse arguments
 def parse_args():
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="DIPmap: Map domains to IPs and check HackerOne scope.")
-    parser.add_argument('-d', '--domain', help="Single domain to check", required=False)
-    parser.add_argument('-f', '--file', help="File containing list of domains", required=False)
+    parser.add_argument('-d', '--domain', help="Single domain to check")
+    parser.add_argument('-f', '--file', help="File containing list of domains")
     parser.add_argument('-I', '--ip', help="Show IP addresses", action='store_true')
-    parser.add_argument('-V', '--version', help="Show version information (e.g., Apache, Nginx)", action='store_true')
-    parser.add_argument('-G', '--geolocation', help="Show Geolocation of the IP addresses", action='store_true')
-    parser.add_argument('-S', '--check-scope', help="Check if the domain is in scope (requires domain)", action='store_true')
-    args = parser.parse_args()
+    parser.add_argument('-V', '--version', help="Show version information", action='store_true')
+    parser.add_argument('-G', '--geolocation', help="Show geolocation of IP addresses", action='store_true')
+    parser.add_argument('-S', '--check-scope', help="Check if the domain is in scope on HackerOne", action='store_true')
+    parser.add_argument('-P', '--port-scan', help="Perform a port scan on the domain's IPs", action='store_true')
+    parser.add_argument('--quick-scan', help="Perform a quick port scan", action='store_true')
+    parser.add_argument('-p', '--ports', help="Comma-separated list of ports to scan (e.g., 22,53,80)")
+    return parser.parse_args()
 
-    if not args.domain and not args.file:
-        print("Error: Please provide a domain or a file of domains.")
-        exit(1)  # Exit the script if no domain or file is provided
-    return args
-
-# Function to get IP addresses for a domain
-def get_ips(domain):
+def parse_custom_ports(port_string):
+    """Parse a comma-separated list of ports."""
     try:
-        ip_addresses = socket.gethostbyname_ex(domain)
-        return ip_addresses[2]
+        return [int(port.strip()) for port in port_string.split(',')]
+    except ValueError:
+        print("Error: Ports must be a comma-separated list of integers.")
+        exit(1)
+
+def get_ips(domain):
+    """Resolve IP addresses for a domain."""
+    try:
+        return socket.gethostbyname_ex(domain)[2]
     except socket.gaierror:
         print(f"Error: Unable to resolve IP addresses for {domain}")
         return []
 
-# Function to get geolocation for an IP address
 def get_geolocation(ip):
+    """Fetch geolocation data for an IP address."""
     try:
-        print(f"Fetching Geolocation for {ip}...")
         response = requests.get(f"http://ip-api.com/json/{ip}", timeout=5)
         response.raise_for_status()
         data = response.json()
@@ -53,55 +62,31 @@ def get_geolocation(ip):
         log_error(f"Error fetching geolocation for {ip}: {e}")
         return f"Error: {e}"
 
-# Function to get the version of the server from HTTP headers
 def get_version(ip):
+    """Get server version information from HTTP headers."""
     try:
-        print(f"Fetching version info for {ip}...")
         response = requests.get(f"http://{ip}", timeout=5)
         response.raise_for_status()
-        server_info = response.headers.get('Server', 'No server info')
-        return server_info
-    except requests.exceptions.Timeout:
-        print(f"Error: The request to fetch version info for {ip} timed out.")
-        return None
+        return response.headers.get('Server', 'No server info')
     except requests.exceptions.RequestException as e:
         log_error(f"Error retrieving version for {ip}: {e}")
         return None
 
-# Function to detect server version from HTTP headers
-def detect_server_version(ip):
-    try:
-        # Make an HTTP request to the server at the IP address
-        response = requests.get(f'http://{ip}', timeout=5)  # Adjust the timeout as needed
-        server_info = response.headers.get('Server', 'Unknown')
-        if 'cloudflare' in server_info.lower():
-            return 'Cloudflare'
-        elif 'apache' in server_info.lower():
-            return 'Apache Server'
-        elif 'nginx' in server_info.lower():
-            return 'Nginx Server'
-        else:
-            return server_info
-    except requests.exceptions.RequestException as e:
-        return f"Error: {e}"
-
-# Function to check if a domain is in scope on HackerOne
 def check_hackerone_scope(domain):
-    api_key = os.getenv('HACKERONE_API_KEY')  # Get the API key from the environment variable
+    """Check if a domain is in scope on HackerOne."""
+    api_key = os.getenv('HACKERONE_API_KEY')
     if not api_key:
         print("Error: API key not found. Please set it as an environment variable.")
         return None
 
     url = f"https://api.hackerone.com/v1/targets?filter[domain]={domain}"
-    headers = {
-        "Authorization": f"Bearer {api_key}"
-    }
+    headers = {"Authorization": f"Bearer {api_key}"}
 
     try:
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
             data = response.json()
-            return bool(data['data'])  # True if domain is in scope, False if not
+            return bool(data['data'])
         else:
             print(f"Error: {response.status_code}, {response.text}")
             return None
@@ -109,22 +94,41 @@ def check_hackerone_scope(domain):
         log_error(f"Error checking scope for {domain}: {e}")
         return None
 
-# Function to print IP addresses and server version
-def print_ip_and_version(domain):
-    print(f"\nProcessing domain: {domain}")
-    ips = get_ips(domain)
-    print(f"IP Addresses: {', '.join(ips)}")
-    for ip in ips:
-        server_info = detect_server_version(ip)
-        print(f"Server Information for {ip}: {server_info}")
+def scan_port(ip, port, timeout=2):
+    """Scan a single port."""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            return port
+    except (socket.timeout, socket.error):
+        return None
 
-# Function to print geolocation for IP addresses
-def print_geolocation(domain):
-    print(f"Fetching geolocation data for domain: {domain}")
-    ips = get_ips(domain)
-    for ip in ips:
-        location_info = get_geolocation(ip)
-        print(location_info)
+def port_scan(ip, ports, timeout=2, threads=4):
+    """Perform a port scan."""
+    open_ports = []
+    with ThreadPoolExecutor(max_workers=threads) as executor:
+        results = executor.map(lambda port: scan_port(ip, port, timeout), ports)
+        for port, result in zip(ports, results):
+            if result:
+                open_ports.append(result)
+    return open_ports
+
+def perform_port_scan(ip, quick=False, custom_ports=None, timeout=2, threads=4):
+    """Handle port scanning with quick or custom options."""
+    if custom_ports:
+        ports_to_scan = custom_ports
+        print(f"Performing custom port scan for {ip}...")
+    elif quick:
+        ports_to_scan = QUICK_SCAN_PORTS
+        print(f"Performing quick port scan for {ip}...")
+    else:
+        ports_to_scan = DEFAULT_PORTS
+        print(f"Performing full port scan for {ip}...")
+    
+    open_ports = port_scan(ip, ports_to_scan, timeout, threads)
+    if open_ports:
+        print(f"Open ports for {ip}: {', '.join(map(str, open_ports))}")
+    else:
+        print(f"No open ports detected for {ip}.")
 
 # Function to print the script banner
 def print_banner():
@@ -140,72 +144,33 @@ def print_banner():
                  """
     print(banner)
 
-# Main script logic
 def main():
-    # Parse the arguments
     args = parse_args()
-
-    # Print banner on execution
+    
     print_banner()
-
-    # Process single domain or file of domains
     if args.domain:
-        # Get IP addresses
         ip_addresses = get_ips(args.domain)
         if ip_addresses:
-            # Geolocation
-            if args.geolocation:
-                print_geolocation(args.domain)
+            print(f"IP Addresses for {args.domain}: {', '.join(ip_addresses)}")
 
-            # Version information
+            if args.geolocation:
+                for ip in ip_addresses:
+                    print(get_geolocation(ip))
+
             if args.version:
                 for ip in ip_addresses:
-                    version_info = get_version(ip)
-                    if version_info:
-                        print(f"Version info for {ip}: {version_info}")
+                    version = get_version(ip)
+                    if version:
+                        print(f"Version info for {ip}: {version}")
                     else:
                         print(f"Could not retrieve version info for {ip}")
 
-            # HackerOne Scope check
-            if args.check_scope:
-                in_scope = check_hackerone_scope(args.domain)
-                if in_scope is None:
-                    print(f"Could not check HackerOne scope for {args.domain}.")
-                elif in_scope:
-                    print(f"{args.domain} is in scope on HackerOne.")
-                else:
-                    print(f"{args.domain} is not in scope on HackerOne.")
+            if args.port_scan or args.quick_scan or args.ports:
+                custom_ports = parse_custom_ports(args.ports) if args.ports else None
+                for ip in ip_addresses:
+                    perform_port_scan(ip, quick=args.quick_scan, custom_ports=custom_ports)
         else:
             print(f"Could not resolve IP addresses for {args.domain}.")
-    
-    # Handle domain list file
-    if args.file:
-        with open(args.file, 'r') as file:
-            domains = file.readlines()
-        for domain in domains:
-            domain = domain.strip()  # Clean up any extra whitespace/newlines
-            print(f"\nProcessing domain: {domain}")
-            ip_addresses = get_ips(domain)
-            if ip_addresses:
-                if args.geolocation:
-                    print_geolocation(domain)
-                if args.version:
-                    for ip in ip_addresses:
-                        version_info = get_version(ip)
-                        if version_info:
-                            print(f"Version info for {ip}: {version_info}")
-                        else:
-                            print(f"Could not retrieve version info for {ip}")
-                if args.check_scope:
-                    in_scope = check_hackerone_scope(domain)
-                    if in_scope is None:
-                        print(f"Could not check HackerOne scope for {domain}.")
-                    elif in_scope:
-                        print(f"{domain} is in scope on HackerOne.")
-                    else:
-                        print(f"{domain} is not in scope on HackerOne.")
-            else:
-                print(f"Could not resolve IP addresses for {domain}.")
 
 if __name__ == "__main__":
     main()
