@@ -1,0 +1,91 @@
+import argparse
+import socket
+
+# Function to print the banner
+def print_banner():
+    banner = r"""
+
+     ____  _______ ____   __  __    _    ____  
+    |  _ \|__  __||    \ |  \/  |  / \  |  _ \ 
+    | | | |  | |  | |_) || |\/| | / _ \ | |_) |
+    | |_| |__| |__|  __/ | |  | |/ ___ \|  __/ 
+    |____/|_______|__|   |_|  |_/_/   \_\_|  
+
+        DIPmap
+    Map Domains to IPs
+    """
+    print(banner)
+
+# Function to resolve a domain to an IP address
+def resolve_to_ip(domain):
+    try:
+        return socket.gethostbyname(domain)
+    except socket.gaierror:
+        return None
+
+# Function to check if a domain is in scope
+def is_in_scope(domain, in_scope_list):
+    return any(domain.endswith(scope) for scope in in_scope_list)
+
+# Main function
+def main():
+    print_banner()
+    
+    parser = argparse.ArgumentParser(description="DIPmap: Map Domains to IPs")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("-f", "--file", type=str, help="File containing list of domains")
+    group.add_argument("-d", "--domain", type=str, help="Single domain to process")
+    parser.add_argument("-I", "--show-ip", action="store_true", help="Show IP addresses for the domain(s)")
+    parser.add_argument("-S", "--check-scope", type=str, help="Comma-separated list of in-scope domains")
+    args = parser.parse_args()
+
+    # Load in-scope domains if provided
+    in_scope_list = args.check_scope.split(",") if args.check_scope else []
+
+    # Process single domain
+    if args.domain:
+        domain = args.domain.strip()
+        print(f"Domain: {domain}")
+
+        if args.show_ip:
+            ip = resolve_to_ip(domain)
+            if ip:
+                print(f"  IP Address: {ip}")
+            else:
+                print(f"  IP Address: Could not resolve")
+
+        if args.check_scope:
+            in_scope = is_in_scope(domain, in_scope_list)
+            scope_status = "IN SCOPE" if in_scope else "OUT OF SCOPE"
+            print(f"  Scope Status: {scope_status}")
+
+    # Process domains from file
+    if args.file:
+        try:
+            with open(args.file, "r") as file:
+                domains = file.readlines()
+        except FileNotFoundError:
+            print(f"Error: File {args.file} not found.")
+            return
+
+        for domain in domains:
+            domain = domain.strip()
+            if not domain:
+                continue
+
+            print(f"Domain: {domain}")
+
+            if args.show_ip:
+                ip = resolve_to_ip(domain)
+                if ip:
+                    print(f"  IP Address: {ip}")
+                else:
+                    print(f"  IP Address: Could not resolve")
+
+            if args.check_scope:
+                in_scope = is_in_scope(domain, in_scope_list)
+                scope_status = "IN SCOPE" if in_scope else "OUT OF SCOPE"
+                print(f"  Scope Status: {scope_status}")
+
+if __name__ == "__main__":
+    main()
