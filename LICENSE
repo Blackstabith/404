@@ -2,6 +2,26 @@ MIT License
 
 Copyright (c) 2024 Blackstabith
 
+#### Key Sections:
+- **Introduction**: Briefly describe the tool and its purpose.
+- **Features**: Highlight key features.
+- **Installation**: Step-by-step instructions on how to set up and install the tool.
+- **Usage**: Detailed example and commands.
+- **Contributing**: Encourage contributions, explain how to do so.
+- **License**: Include your open-source license (MIT is a popular choice).
+- **Introduction**: This tool is designed to pull IP addresses and Geo Locations as well as versions of software.
+- **Features**: IP look up, Geo location look up, and Domain Health.
+- **Installation**: pip install -r requirements.txt or sudo cp dipmap.py /usr/local/bin/dipmap sudo chmod +x /usr/local/bin/dipmap.
+- **Usage**: dipmap -d <domain> -I -V -G. 
+This will:
+Show the IP addresses for google.com
+Fetch the server version information
+Show geolocation data for the IP addresses
+- **Contributing**: Contributions are welcome! If you'd like to help improve this tool, feel free to fork the repository, create a new branch, and submit a pull request.
+- **License**: 
+
+MIT License
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
