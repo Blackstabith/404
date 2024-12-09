@@ -1,91 +1,104 @@
+#!/usr/bin/env python3
+
 import argparse
+import os
 import socket
+import requests
 
-# Function to print the banner
+# Function to get IP addresses for a domain
+def get_ips(domain):
+    try:
+        ip_addresses = socket.gethostbyname_ex(domain)
+        return ip_addresses[2]
+    except socket.gaierror:
+        return []
+
+# Function to check if a domain is in scope on HackerOne
+def check_hackerone_scope(domain):
+    api_key = os.getenv('HACKERONE_API_KEY')  # Get the API key from the environment variable
+    if not api_key:
+        print("API key not found. Please set it as an environment variable.")
+        return None
+
+    url = f"https://api.hackerone.com/v1/targets?filter[domain]={domain}"
+    
+    # Print the URL being requested for debugging
+    print(f"Requesting URL: {url}")
+
+    headers = {
+        "Authorization": f"Bearer {api_key}"
+    }
+
+    response = requests.get(url, headers=headers)
+    
+    # Print the response status and text to check what we got from the API
+    print(f"Response: {response.status_code} {response.text}")
+
+    if response.status_code == 200:
+        data = response.json()
+        print(f"Data: {data}")  # Print the response data for further debugging
+        if data['data']:
+            return True  # Domain is in scope
+        else:
+            return False  # Domain is not in scope
+    else:
+        print(f"Error: {response.status_code}, {response.text}")
+        return None
+
+# Function to print the script banner
 def print_banner():
+    print("Printing the banner...")  # Debug line to confirm if it's called
     banner = r"""
-
      ____  _______ ____   __  __    _    ____  
     |  _ \|__  __||    \ |  \/  |  / \  |  _ \ 
     | | | |  | |  | |_) || |\/| | / _ \ | |_) |
     | |_| |__| |__|  __/ | |  | |/ ___ \|  __/ 
     |____/|_______|__|   |_|  |_/_/   \_\_|  
 
-        DIPmap
-    Map Domains to IPs
-    """
+                     DIPmap
+                Map Domains to IPs
+                 """
     print(banner)
 
-# Function to resolve a domain to an IP address
-def resolve_to_ip(domain):
-    try:
-        return socket.gethostbyname(domain)
-    except socket.gaierror:
-        return None
+# Argument parsing
+parser = argparse.ArgumentParser(description="DIPmap: Map domains to IPs and check HackerOne scope.")
+parser.add_argument('-d', '--domain', help="Single domain to check", required=False)
+parser.add_argument('-f', '--file', help="File containing list of domains", required=False)
+parser.add_argument('-I', '--ip', help="Show IP addresses", action='store_true')
+parser.add_argument('-S', '--check-scope', help="Check if the domain is in scope (requires domain)", action='store_true')
+args = parser.parse_args()
 
-# Function to check if a domain is in scope
-def is_in_scope(domain, in_scope_list):
-    return any(domain.endswith(scope) for scope in in_scope_list)
+# Print banner on execution
+print_banner()  # This should print the banner when you run the script
 
-# Main function
-def main():
-    print_banner()
-    
-    parser = argparse.ArgumentParser(description="DIPmap: Map Domains to IPs")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("-f", "--file", type=str, help="File containing list of domains")
-    group.add_argument("-d", "--domain", type=str, help="Single domain to process")
-    parser.add_argument("-I", "--show-ip", action="store_true", help="Show IP addresses for the domain(s)")
-    parser.add_argument("-S", "--check-scope", type=str, help="Comma-separated list of in-scope domains")
-    args = parser.parse_args()
+# Handle domain or file input
+if args.file:
+    with open(args.file, 'r') as file:
+        domains = file.readlines()
+    domains = [domain.strip() for domain in domains]
+elif args.domain:
+    domains = [args.domain]
+else:
+    print("Error: You must specify a domain with -d or provide a file with -f.")
+    exit(1)
 
-    # Load in-scope domains if provided
-    in_scope_list = args.check_scope.split(",") if args.check_scope else []
+# Process each domain
+for domain in domains:
+    print(f"\nProcessing domain: {domain}")
 
-    # Process single domain
-    if args.domain:
-        domain = args.domain.strip()
-        print(f"Domain: {domain}")
+    # Show IP addresses if -I is used
+    if args.ip:
+        ip_addresses = get_ips(domain)
+        if ip_addresses:
+            print(f"  IP Addresses: {', '.join(ip_addresses)}")
+        else:
+            print("  No IP addresses found.")
 
-        if args.show_ip:
-            ip = resolve_to_ip(domain)
-            if ip:
-                print(f"  IP Address: {ip}")
-            else:
-                print(f"  IP Address: Could not resolve")
-
-        if args.check_scope:
-            in_scope = is_in_scope(domain, in_scope_list)
+    # Check HackerOne scope if -S is used
+    if args.check_scope:
+        in_scope = check_hackerone_scope(domain)
+        if in_scope is None:
+            print(f"Error checking scope for {domain}.")
+        else:
             scope_status = "IN SCOPE" if in_scope else "OUT OF SCOPE"
             print(f"  Scope Status: {scope_status}")
-
-    # Process domains from file
-    if args.file:
-        try:
-            with open(args.file, "r") as file:
-                domains = file.readlines()
-        except FileNotFoundError:
-            print(f"Error: File {args.file} not found.")
-            return
-
-        for domain in domains:
-            domain = domain.strip()
-            if not domain:
-                continue
-
-            print(f"Domain: {domain}")
-
-            if args.show_ip:
-                ip = resolve_to_ip(domain)
-                if ip:
-                    print(f"  IP Address: {ip}")
-                else:
-                    print(f"  IP Address: Could not resolve")
-
-            if args.check_scope:
-                in_scope = is_in_scope(domain, in_scope_list)
-                scope_status = "IN SCOPE" if in_scope else "OUT OF SCOPE"
-                print(f"  Scope Status: {scope_status}")
-
-if __name__ == "__main__":
-    main()
