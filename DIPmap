@@ -21,22 +21,13 @@ def check_hackerone_scope(domain):
         return None
 
     url = f"https://api.hackerone.com/v1/targets?filter[domain]={domain}"
-    
-    # Print the URL being requested for debugging
-    print(f"Requesting URL: {url}")
-
     headers = {
         "Authorization": f"Bearer {api_key}"
     }
 
     response = requests.get(url, headers=headers)
-    
-    # Print the response status and text to check what we got from the API
-    print(f"Response: {response.status_code} {response.text}")
-
     if response.status_code == 200:
         data = response.json()
-        print(f"Data: {data}")  # Print the response data for further debugging
         if data['data']:
             return True  # Domain is in scope
         else:
@@ -45,9 +36,31 @@ def check_hackerone_scope(domain):
         print(f"Error: {response.status_code}, {response.text}")
         return None
 
+# Function to get geolocation of an IP address
+def get_ip_geolocation(ip):
+    try:
+        # Using ipinfo.io API for geolocation
+        url = f"https://ipinfo.io/{ip}/json"
+        response = requests.get(url)
+        data = response.json()
+        if response.status_code == 200:
+            return data.get("country", "Unknown"), data.get("city", "Unknown")
+        else:
+            return "Unknown", "Unknown"
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching geolocation: {e}")
+        return "Unknown", "Unknown"
+
+# Function to check domain health (whether it resolves to an IP)
+def check_domain_health(domain):
+    try:
+        socket.gethostbyname(domain)
+        return True  # Domain resolves successfully
+    except socket.gaierror:
+        return False  # Domain resolution failed
+
 # Function to print the script banner
 def print_banner():
-    print("Printing the banner...")  # Debug line to confirm if it's called
     banner = r"""
      ____  _______ ____   __  __    _    ____  
     |  _ \|__  __||    \ |  \/  |  / \  |  _ \ 
@@ -66,39 +79,50 @@ parser.add_argument('-d', '--domain', help="Single domain to check", required=Fa
 parser.add_argument('-f', '--file', help="File containing list of domains", required=False)
 parser.add_argument('-I', '--ip', help="Show IP addresses", action='store_true')
 parser.add_argument('-S', '--check-scope', help="Check if the domain is in scope (requires domain)", action='store_true')
+parser.add_argument('-G', '--geolocation', help="Get geolocation of IPs", action='store_true')
+parser.add_argument('-H', '--health', help="Check domain health", action='store_true')
 args = parser.parse_args()
 
 # Print banner on execution
-print_banner()  # This should print the banner when you run the script
+print_banner()
 
-# Handle domain or file input
-if args.file:
-    with open(args.file, 'r') as file:
-        domains = file.readlines()
-    domains = [domain.strip() for domain in domains]
-elif args.domain:
+# Process the domain input or file
+if args.domain:
     domains = [args.domain]
+elif args.file:
+    with open(args.file, 'r') as f:
+        domains = f.read().splitlines()
 else:
-    print("Error: You must specify a domain with -d or provide a file with -f.")
+    print("No domain or file input provided. Exiting.")
     exit(1)
 
-# Process each domain
+# Iterate over the domains
 for domain in domains:
-    print(f"\nProcessing domain: {domain}")
-
-    # Show IP addresses if -I is used
-    if args.ip:
-        ip_addresses = get_ips(domain)
-        if ip_addresses:
-            print(f"  IP Addresses: {', '.join(ip_addresses)}")
-        else:
-            print("  No IP addresses found.")
-
-    # Check HackerOne scope if -S is used
+    print(f"Processing domain: {domain}")
+    
+    # Get IP addresses for the domain
+    ip_addresses = get_ips(domain)
+    if ip_addresses:
+        print(f"IP Addresses: {', '.join(ip_addresses)}")
+        if args.geolocation:
+            for ip in ip_addresses:
+                country, city = get_ip_geolocation(ip)
+                print(f"Geolocation for IP {ip}: {city}, {country}")
+    else:
+        print("No IP addresses found.")
+    
+    # Domain health check
+    if args.health:
+        is_healthy = check_domain_health(domain)
+        health_status = "Healthy" if is_healthy else "Unhealthy"
+        print(f"Domain health status: {health_status}")
+    
+    # Check if the domain is in scope (HackerOne)
     if args.check_scope:
         in_scope = check_hackerone_scope(domain)
         if in_scope is None:
             print(f"Error checking scope for {domain}.")
+        elif in_scope:
+            print(f"{domain} is in scope on HackerOne.")
         else:
-            scope_status = "IN SCOPE" if in_scope else "OUT OF SCOPE"
-            print(f"  Scope Status: {scope_status}")
+            print(f"{domain} is not in scope on HackerOne.")
