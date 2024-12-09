@@ -11,7 +11,7 @@ DIPmap is a command-line tool designed for bug bounty hunters and penetration te
 ## Installation
 
 ### Prerequisites
-Make sure you have Python 3.x installed. You'll also need the following Python libraries:
+Make sure you have Python 3 installed. You'll also need the following Python libraries:
 - `requests`
 - `argparse`
 - `socket`
@@ -20,7 +20,7 @@ Make sure you have Python 3.x installed. You'll also need the following Python l
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/dipmap.git
+   git clone https://github.com/Blackstabith/dipmap.git
    cd dipmap
 
 pip install -r requirements.txt
@@ -37,7 +37,7 @@ Command Line Options:
 -I, --ip: Show IP addresses for the domain.
 -V, --version: Show server version information (Apache, Nginx, etc.).
 -G, --geolocation: Get geolocation information for the IP addresses.
--S, --check-scope: Check if the domain is in scope for HackerOne (requires an API key).
+(work in progress) -S, --check-scope: Check if the domain is in scope for HackerOne (requires an API key).
 
 Example
 dipmap -d google.com -I -V -G
