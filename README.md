@@ -1,12 +1,12 @@
 # DIPmap - Domain to IP Mapping & Bug Bounty Tool
 
-DIPmap is a command-line tool designed for bug bounty hunters and penetration testers. It helps map domains to IP addresses and provides additional functionality like geolocation, server version detection, and scope checking (with HackerOne support).
+DIPmap is a command-line tool designed for bug bounty hunters and penetration testers. It helps map domains to IP addresses and provides additional functionality like geolocation, server version detection, and port scanning.
 
 ## Features
 - **Domain to IP Mapping**: Resolve domains to their corresponding IP addresses.
 - **Server Version Detection**: Detect server versions (Apache, Nginx, Cloudflare, etc.).
 - **Geolocation**: Get the geolocation (country, region, city) of the IP addresses.
-- **HackerOne Scope Checking**: Check if a domain is in scope for a HackerOne bug bounty program (requires API key).
+- **Port Scanning all in one.
 
 ## Installation
 
