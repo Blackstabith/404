@@ -4,6 +4,31 @@ import argparse
 import os
 import socket
 import requests
+import time
+import logging
+
+# Set up logging configuration
+logging.basicConfig(filename="dipmap_errors.log", level=logging.ERROR, format="%(asctime)s - %(message)s")
+
+# Function to log errors
+def log_error(error_message):
+    logging.error(error_message)
+
+# Function to validate and parse arguments
+def parse_args():
+    parser = argparse.ArgumentParser(description="DIPmap: Map domains to IPs and check HackerOne scope.")
+    parser.add_argument('-d', '--domain', help="Single domain to check", required=False)
+    parser.add_argument('-f', '--file', help="File containing list of domains", required=False)
+    parser.add_argument('-I', '--ip', help="Show IP addresses", action='store_true')
+    parser.add_argument('-V', '--version', help="Show version information (e.g., Apache, Nginx)", action='store_true')
+    parser.add_argument('-G', '--geolocation', help="Show Geolocation of the IP addresses", action='store_true')
+    parser.add_argument('-S', '--check-scope', help="Check if the domain is in scope (requires domain)", action='store_true')
+    args = parser.parse_args()
+
+    if not args.domain and not args.file:
+        print("Error: Please provide a domain or a file of domains.")
+        exit(1)  # Exit the script if no domain or file is provided
+    return args
 
 # Function to get IP addresses for a domain
 def get_ips(domain):
@@ -11,13 +36,60 @@ def get_ips(domain):
         ip_addresses = socket.gethostbyname_ex(domain)
         return ip_addresses[2]
     except socket.gaierror:
+        print(f"Error: Unable to resolve IP addresses for {domain}")
         return []
+
+# Function to get geolocation for an IP address
+def get_geolocation(ip):
+    try:
+        print(f"Fetching Geolocation for {ip}...")
+        response = requests.get(f"http://ip-api.com/json/{ip}", timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        if data['status'] == 'fail':
+            return f"Geolocation data unavailable for {ip}"
+        return f"IP: {ip} - Country: {data['country']}, Region: {data['regionName']}, City: {data['city']}"
+    except requests.exceptions.RequestException as e:
+        log_error(f"Error fetching geolocation for {ip}: {e}")
+        return f"Error: {e}"
+
+# Function to get the version of the server from HTTP headers
+def get_version(ip):
+    try:
+        print(f"Fetching version info for {ip}...")
+        response = requests.get(f"http://{ip}", timeout=5)
+        response.raise_for_status()
+        server_info = response.headers.get('Server', 'No server info')
+        return server_info
+    except requests.exceptions.Timeout:
+        print(f"Error: The request to fetch version info for {ip} timed out.")
+        return None
+    except requests.exceptions.RequestException as e:
+        log_error(f"Error retrieving version for {ip}: {e}")
+        return None
+
+# Function to detect server version from HTTP headers
+def detect_server_version(ip):
+    try:
+        # Make an HTTP request to the server at the IP address
+        response = requests.get(f'http://{ip}', timeout=5)  # Adjust the timeout as needed
+        server_info = response.headers.get('Server', 'Unknown')
+        if 'cloudflare' in server_info.lower():
+            return 'Cloudflare'
+        elif 'apache' in server_info.lower():
+            return 'Apache Server'
+        elif 'nginx' in server_info.lower():
+            return 'Nginx Server'
+        else:
+            return server_info
+    except requests.exceptions.RequestException as e:
+        return f"Error: {e}"
 
 # Function to check if a domain is in scope on HackerOne
 def check_hackerone_scope(domain):
     api_key = os.getenv('HACKERONE_API_KEY')  # Get the API key from the environment variable
     if not api_key:
-        print("API key not found. Please set it as an environment variable.")
+        print("Error: API key not found. Please set it as an environment variable.")
         return None
 
     url = f"https://api.hackerone.com/v1/targets?filter[domain]={domain}"
@@ -25,39 +97,34 @@ def check_hackerone_scope(domain):
         "Authorization": f"Bearer {api_key}"
     }
 
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        data = response.json()
-        if data['data']:
-            return True  # Domain is in scope
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            return bool(data['data'])  # True if domain is in scope, False if not
         else:
-            return False  # Domain is not in scope
-    else:
-        print(f"Error: {response.status_code}, {response.text}")
+            print(f"Error: {response.status_code}, {response.text}")
+            return None
+    except requests.exceptions.RequestException as e:
+        log_error(f"Error checking scope for {domain}: {e}")
         return None
 
-# Function to get geolocation of an IP address
-def get_ip_geolocation(ip):
-    try:
-        # Using ipinfo.io API for geolocation
-        url = f"https://ipinfo.io/{ip}/json"
-        response = requests.get(url)
-        data = response.json()
-        if response.status_code == 200:
-            return data.get("country", "Unknown"), data.get("city", "Unknown")
-        else:
-            return "Unknown", "Unknown"
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching geolocation: {e}")
-        return "Unknown", "Unknown"
+# Function to print IP addresses and server version
+def print_ip_and_version(domain):
+    print(f"\nProcessing domain: {domain}")
+    ips = get_ips(domain)
+    print(f"IP Addresses: {', '.join(ips)}")
+    for ip in ips:
+        server_info = detect_server_version(ip)
+        print(f"Server Information for {ip}: {server_info}")
 
-# Function to check domain health (whether it resolves to an IP)
-def check_domain_health(domain):
-    try:
-        socket.gethostbyname(domain)
-        return True  # Domain resolves successfully
-    except socket.gaierror:
-        return False  # Domain resolution failed
+# Function to print geolocation for IP addresses
+def print_geolocation(domain):
+    print(f"Fetching geolocation data for domain: {domain}")
+    ips = get_ips(domain)
+    for ip in ips:
+        location_info = get_geolocation(ip)
+        print(location_info)
 
 # Function to print the script banner
 def print_banner():
@@ -73,56 +140,72 @@ def print_banner():
                  """
     print(banner)
 
-# Argument parsing
-parser = argparse.ArgumentParser(description="DIPmap: Map domains to IPs and check HackerOne scope.")
-parser.add_argument('-d', '--domain', help="Single domain to check", required=False)
-parser.add_argument('-f', '--file', help="File containing list of domains", required=False)
-parser.add_argument('-I', '--ip', help="Show IP addresses", action='store_true')
-parser.add_argument('-S', '--check-scope', help="Check if the domain is in scope (requires domain)", action='store_true')
-parser.add_argument('-G', '--geolocation', help="Get geolocation of IPs", action='store_true')
-parser.add_argument('-H', '--health', help="Check domain health", action='store_true')
-args = parser.parse_args()
+# Main script logic
+def main():
+    # Parse the arguments
+    args = parse_args()
 
-# Print banner on execution
-print_banner()
+    # Print banner on execution
+    print_banner()
 
-# Process the domain input or file
-if args.domain:
-    domains = [args.domain]
-elif args.file:
-    with open(args.file, 'r') as f:
-        domains = f.read().splitlines()
-else:
-    print("No domain or file input provided. Exiting.")
-    exit(1)
+    # Process single domain or file of domains
+    if args.domain:
+        # Get IP addresses
+        ip_addresses = get_ips(args.domain)
+        if ip_addresses:
+            # Geolocation
+            if args.geolocation:
+                print_geolocation(args.domain)
 
-# Iterate over the domains
-for domain in domains:
-    print(f"Processing domain: {domain}")
-    
-    # Get IP addresses for the domain
-    ip_addresses = get_ips(domain)
-    if ip_addresses:
-        print(f"IP Addresses: {', '.join(ip_addresses)}")
-        if args.geolocation:
-            for ip in ip_addresses:
-                country, city = get_ip_geolocation(ip)
-                print(f"Geolocation for IP {ip}: {city}, {country}")
-    else:
-        print("No IP addresses found.")
-    
-    # Domain health check
-    if args.health:
-        is_healthy = check_domain_health(domain)
-        health_status = "Healthy" if is_healthy else "Unhealthy"
-        print(f"Domain health status: {health_status}")
-    
-    # Check if the domain is in scope (HackerOne)
-    if args.check_scope:
-        in_scope = check_hackerone_scope(domain)
-        if in_scope is None:
-            print(f"Error checking scope for {domain}.")
-        elif in_scope:
-            print(f"{domain} is in scope on HackerOne.")
+            # Version information
+            if args.version:
+                for ip in ip_addresses:
+                    version_info = get_version(ip)
+                    if version_info:
+                        print(f"Version info for {ip}: {version_info}")
+                    else:
+                        print(f"Could not retrieve version info for {ip}")
+
+            # HackerOne Scope check
+            if args.check_scope:
+                in_scope = check_hackerone_scope(args.domain)
+                if in_scope is None:
+                    print(f"Could not check HackerOne scope for {args.domain}.")
+                elif in_scope:
+                    print(f"{args.domain} is in scope on HackerOne.")
+                else:
+                    print(f"{args.domain} is not in scope on HackerOne.")
         else:
-            print(f"{domain} is not in scope on HackerOne.")
+            print(f"Could not resolve IP addresses for {args.domain}.")
+    
+    # Handle domain list file
+    if args.file:
+        with open(args.file, 'r') as file:
+            domains = file.readlines()
+        for domain in domains:
+            domain = domain.strip()  # Clean up any extra whitespace/newlines
+            print(f"\nProcessing domain: {domain}")
+            ip_addresses = get_ips(domain)
+            if ip_addresses:
+                if args.geolocation:
+                    print_geolocation(domain)
+                if args.version:
+                    for ip in ip_addresses:
+                        version_info = get_version(ip)
+                        if version_info:
+                            print(f"Version info for {ip}: {version_info}")
+                        else:
+                            print(f"Could not retrieve version info for {ip}")
+                if args.check_scope:
+                    in_scope = check_hackerone_scope(domain)
+                    if in_scope is None:
+                        print(f"Could not check HackerOne scope for {domain}.")
+                    elif in_scope:
+                        print(f"{domain} is in scope on HackerOne.")
+                    else:
+                        print(f"{domain} is not in scope on HackerOne.")
+            else:
+                print(f"Could not resolve IP addresses for {domain}.")
+
+if __name__ == "__main__":
+    main()
