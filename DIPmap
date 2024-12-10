@@ -4,9 +4,10 @@ import argparse
 import os
 import socket
 import requests
-import time
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from colorama import Fore, Style
 
 # Logging configuration
 logging.basicConfig(filename="dipmap_errors.log", level=logging.ERROR, format="%(asctime)s - %(message)s")
@@ -15,32 +16,71 @@ logging.basicConfig(filename="dipmap_errors.log", level=logging.ERROR, format="%
 DEFAULT_PORTS = [80, 443, 8080, 8443]
 QUICK_SCAN_PORTS = [21, 22, 80, 443]
 
-def log_error(error_message):
-    """Log errors to a file."""
-    logging.error(error_message)
+# Banner Display
+def print_banner():
+    banner = r"""
+     ____  _______ ____   __  __    _    ____  
+    |  _ \|__  __||    \ |  \/  |  / \  |  _ \ 
+    | | | |  | |  | |_) || |\/| | / _ \ | |_) |
+    | |_| |__| |__|  __/ | |  | |/ ___ \|  __/ 
+    |____/|_______|__|   |_|  |_/_/   \_\_|  
 
-def parse_args():
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="DIPmap: Map domains to IPs and check HackerOne scope.")
-    parser.add_argument('-d', '--domain', help="Single domain to check")
-    parser.add_argument('-f', '--file', help="File containing list of domains")
-    parser.add_argument('-I', '--ip', help="Show IP addresses", action='store_true')
-    parser.add_argument('-V', '--version', help="Show version information", action='store_true')
-    parser.add_argument('-G', '--geolocation', help="Show geolocation of IP addresses", action='store_true')
-    parser.add_argument('-S', '--check-scope', help="Check if the domain is in scope on HackerOne", action='store_true')
-    parser.add_argument('-P', '--port-scan', help="Perform a port scan on the domain's IPs", action='store_true')
-    parser.add_argument('--quick-scan', help="Perform a quick port scan", action='store_true')
-    parser.add_argument('-p', '--ports', help="Comma-separated list of ports to scan (e.g., 22,53,80)")
-    return parser.parse_args()
+                     DIPmap
+                Map Domains to IPs
+    """
+    print(banner)
 
-def parse_custom_ports(port_string):
-    """Parse a comma-separated list of ports."""
+# API Key Management
+def load_api_keys():
+    """Load API keys from environment variables or a JSON config file."""
+    api_keys = {
+        "hackerone": os.getenv("HACKERONE_API_KEY"),
+        "bugcrowd": os.getenv("BUGCROWD_API_KEY"),
+        "intigriti": os.getenv("INTIGRITI_API_KEY")
+    }
+    
+    if None in api_keys.values():
+        try:
+            with open("api_keys.json", "r") as file:
+                config = json.load(file)
+                for key in api_keys:
+                    if not api_keys[key]:  # Load only missing keys
+                        api_keys[key] = config.get(key)
+        except FileNotFoundError:
+            print(Fore.RED + "No API keys found in environment or config file." + Style.RESET_ALL)
+
+    return api_keys
+
+# Scope Checking
+def check_scope(domain, platform, api_key):
+    """Check if a domain is in scope on a given platform."""
+    urls = {
+        "hackerone": f"https://api.hackerone.com/v1/targets?filter[domain]={domain}",
+        # Add more platforms as needed
+    }
+    
+    url = urls.get(platform)
+    if not url:
+        print(f"{Fore.RED}Unsupported platform: {platform}{Style.RESET_ALL}")
+        return None
+
+    headers = {"Authorization": f"Bearer {api_key}"}
     try:
-        return [int(port.strip()) for port in port_string.split(',')]
-    except ValueError:
-        print("Error: Ports must be a comma-separated list of integers.")
-        exit(1)
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        if data.get('data'):
+            print(f"{Fore.GREEN}[in scope] {domain} on {platform}{Style.RESET_ALL}")
+            return True
+        else:
+            print(f"{Fore.RED}[out of scope] {domain} on {platform}{Style.RESET_ALL}")
+            return False
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error checking scope for {domain} on {platform}: {e}")
+        print(f"Error: Unable to check scope for {domain} on {platform}")
+        return None
 
+# IP Resolution
 def get_ips(domain):
     """Resolve IP addresses for a domain."""
     try:
@@ -49,6 +89,7 @@ def get_ips(domain):
         print(f"Error: Unable to resolve IP addresses for {domain}")
         return []
 
+# Geolocation
 def get_geolocation(ip):
     """Fetch geolocation data for an IP address."""
     try:
@@ -59,9 +100,10 @@ def get_geolocation(ip):
             return f"Geolocation data unavailable for {ip}"
         return f"IP: {ip} - Country: {data['country']}, Region: {data['regionName']}, City: {data['city']}"
     except requests.exceptions.RequestException as e:
-        log_error(f"Error fetching geolocation for {ip}: {e}")
+        logging.error(f"Error fetching geolocation for {ip}: {e}")
         return f"Error: {e}"
 
+# Version Checking
 def get_version(ip):
     """Get server version information from HTTP headers."""
     try:
@@ -69,31 +111,10 @@ def get_version(ip):
         response.raise_for_status()
         return response.headers.get('Server', 'No server info')
     except requests.exceptions.RequestException as e:
-        log_error(f"Error retrieving version for {ip}: {e}")
+        logging.error(f"Error retrieving version for {ip}: {e}")
         return None
 
-def check_hackerone_scope(domain):
-    """Check if a domain is in scope on HackerOne."""
-    api_key = os.getenv('HACKERONE_API_KEY')
-    if not api_key:
-        print("Error: API key not found. Please set it as an environment variable.")
-        return None
-
-    url = f"https://api.hackerone.com/v1/targets?filter[domain]={domain}"
-    headers = {"Authorization": f"Bearer {api_key}"}
-
-    try:
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            return bool(data['data'])
-        else:
-            print(f"Error: {response.status_code}, {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        log_error(f"Error checking scope for {domain}: {e}")
-        return None
-
+# Port Scanning
 def scan_port(ip, port, timeout=2):
     """Scan a single port."""
     try:
@@ -130,24 +151,31 @@ def perform_port_scan(ip, quick=False, custom_ports=None, timeout=2, threads=4):
     else:
         print(f"No open ports detected for {ip}.")
 
-# Function to print the script banner
-def print_banner():
-    banner = r"""
-     ____  _______ ____   __  __    _    ____  
-    |  _ \|__  __||    \ |  \/  |  / \  |  _ \ 
-    | | | |  | |  | |_) || |\/| | / _ \ | |_) |
-    | |_| |__| |__|  __/ | |  | |/ ___ \|  __/ 
-    |____/|_______|__|   |_|  |_/_/   \_\_|  
+# Command-Line Arguments
+def parse_args():
+    parser = argparse.ArgumentParser(description="DIPmap: Map domains to IPs, check scope, and perform scans.")
+    parser.add_argument('-d', '--domain', help="Single domain to check")
+    parser.add_argument('-S', '--scope-check', help="Check if the domain is in scope on a platform (e.g., 'hackerone')")
+    parser.add_argument('-G', '--geolocation', help="Show geolocation of IP addresses", action='store_true')
+    parser.add_argument('-P', '--port-scan', help="Perform a port scan on the domain's IPs", action='store_true')
+    parser.add_argument('--quick-scan', help="Perform a quick port scan", action='store_true')
+    parser.add_argument('-p', '--ports', help="Comma-separated list of ports to scan (e.g., 22,53,80)")
+    parser.add_argument('-V', '--version', help="Retrieve server version information for the domain's IPs", action='store_true')
+    return parser.parse_args()
 
-                     DIPmap
-                Map Domains to IPs
-                 """
-    print(banner)
+def parse_custom_ports(port_string):
+    """Parse a comma-separated list of ports."""
+    try:
+        return [int(port.strip()) for port in port_string.split(',')]
+    except ValueError:
+        print("Error: Ports must be a comma-separated list of integers.")
+        exit(1)
 
+# Main Execution
 def main():
     args = parse_args()
-    
     print_banner()
+
     if args.domain:
         ip_addresses = get_ips(args.domain)
         if ip_addresses:
@@ -157,20 +185,29 @@ def main():
                 for ip in ip_addresses:
                     print(get_geolocation(ip))
 
-            if args.version:
-                for ip in ip_addresses:
-                    version = get_version(ip)
-                    if version:
-                        print(f"Version info for {ip}: {version}")
-                    else:
-                        print(f"Could not retrieve version info for {ip}")
-
             if args.port_scan or args.quick_scan or args.ports:
                 custom_ports = parse_custom_ports(args.ports) if args.ports else None
                 for ip in ip_addresses:
                     perform_port_scan(ip, quick=args.quick_scan, custom_ports=custom_ports)
         else:
             print(f"Could not resolve IP addresses for {args.domain}.")
+
+    if args.domain and args.scope_check:
+        api_keys = load_api_keys()
+        platform = args.scope_check.lower()
+        api_key = api_keys.get(platform)
+        if api_key:
+            check_scope(args.domain, platform, api_key)
+        else:
+            print(f"{Fore.RED}No API key found for {platform}. Please add it to the configuration.{Style.RESET_ALL}")
+
+    if args.version:
+       for ip in ip_addresses:
+           version = get_version(ip)
+           if version:
+               print(f"Version info for {ip}: {version}")
+           else:
+               print(f"Could not retrieve version info for {ip}")
 
 if __name__ == "__main__":
     main()
