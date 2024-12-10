@@ -9,6 +9,31 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from colorama import Fore, Style
 
+# Function to fetch and check against the disclose.io JSON file
+def check_disclosure_program(domain):
+    """Check if the domain is in the Disclose.io vulnerability disclosure program list."""
+    
+    # Replace with the actual URL or local path to the JSON file
+    disclose_url = "https://github.com/disclose/diodb/blob/master/program-list.json"  # Example URL (replace with actual)
+    
+    try:
+        # Fetch JSON file from URL
+        response = requests.get(disclose_url, timeout=5)
+        response.raise_for_status()  # Check for request errors
+        
+        # Parse the JSON response
+        programs_data = response.json()
+        
+        # Loop through the list of programs and check for the domain
+        for program in programs_data:
+            # You may need to adjust the domain matching logic depending on the format
+            if domain in program.get('contact_email', '') or domain in program.get('policy_url', ''):
+                return Fore.GREEN + f"Domain found in Disclose.io program: {program['program_name']} - {program['policy_url']}" + Style.RESET_ALL
+        return Fore.YELLOW + f"Domain not found in Disclose.io programs list: {domain}" + Style.RESET_ALL
+
+    except requests.exceptions.RequestException as e:
+        return Fore.RED + f"Error fetching Disclose.io data: {e}" + Style.RESET_AL
+
 # Logging configuration
 logging.basicConfig(filename="dipmap_errors.log", level=logging.ERROR, format="%(asctime)s - %(message)s")
 
@@ -18,6 +43,7 @@ def log_error(error_message):
     logging.error(error_message)
 
 # Predefined port lists
+TIMEOUT = 5  # Default timeout for HTTP requests
 DEFAULT_PORTS = [80, 443, 8080, 8443]
 QUICK_SCAN_PORTS = [21, 22, 80, 443]
 
@@ -58,16 +84,9 @@ def check_bug_bounty_directories(domain):
 
     return results
 
-# Check crowdsourced lists (e.g., disclose.io)
-def check_crowdsourced_lists(domain):
-    """Search crowdsourced lists for the domain."""
-    # This example uses a local JSON file for simplicity.
-    # Replace with actual disclose.io API or external source if available.
-    crowdsourced_list = ["example.com", "test.com"]  # Example list
-    if domain in crowdsourced_list:
-        return Fore.GREEN + f"Found in disclose.io repository: {domain}" + Style.RESET_ALL
-    else:
-        return Fore.YELLOW + f"Domain not found in disclose.io repository: {domain}" + Style.RESET_ALL
+# Check Disclose.io vulnerability disclosure programs
+    disclose_result = check_disclosure_program(domain)
+    print(disclose_result)
 
 # Banner Display
 def print_banner():
@@ -102,36 +121,35 @@ def load_api_keys():
         except FileNotFoundError:
             print(Fore.RED + "No API keys found in environment or config file." + Style.RESET_ALL)
 
+def warn_missing_api_keys(api_keys):
+    missing = [key for key, value in api_keys.items() if value is None]
+    if missing:
+        print(Fore.YELLOW + f"Warning: Missing API keys for {', '.join(missing)}. "
+                            f"Please set environment variables or update 'api_keys.json'." + Style.RESET_ALL)
+
     return api_keys
 
-# Scope Checking
-def check_scope(domain, platform, api_key):
-    """Check if a domain is in scope on a given platform."""
-    urls = {
-        "hackerone": f"https://api.hackerone.com/v1/targets?filter[domain]={domain}",
-        # Add more platforms as needed
+# Check bug bounty directories
+def check_bug_bounty_directories(domain):
+    """Check known bug bounty directories for the domain."""
+    results = []
+    directories = {
+        "HackerOne": f"https://hackerone.com/{domain}",
+        "Bugcrowd": f"https://bugcrowd.com/{domain}"
     }
-    
-    url = urls.get(platform)
-    if not url:
-        print(f"{Fore.RED}Unsupported platform: {platform}{Style.RESET_ALL}")
-        return None
+    for name, url in directories.items():
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                results.append(Fore.GREEN + f"Found on {name}: {url}" + Style.RESET_ALL)
+            else:
+                results.append(Fore.YELLOW + f"No listing found on {name} for {domain}" + Style.RESET_ALL)
+        except requests.exceptions.RequestException as e:
+            print(Fore.RED + f"Error checking {name} for {domain}: {e}" + Style.RESET_ALL)
+            log_error(f"Error checking {name} for {domain}: {e}")
 
-    headers = {"Authorization": f"Bearer {api_key}"}
-    try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-        if data.get('data'):
-            print(f"{Fore.GREEN}[in scope] {domain} on {platform}{Style.RESET_ALL}")
-            return True
-        else:
-            print(f"{Fore.RED}[out of scope] {domain} on {platform}{Style.RESET_ALL}")
-            return False
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error checking scope for {domain} on {platform}: {e}")
-        print(f"Error: Unable to check scope for {domain} on {platform}")
-        return None
+    return results
+
 
 # IP Resolution
 def get_ips(domain):
@@ -204,6 +222,42 @@ def perform_port_scan(ip, quick=False, custom_ports=None, timeout=2, threads=4):
     else:
         print(f"No open ports detected for {ip}.")
 
+def parse_custom_ports(port_string):
+    """Parse a comma-separated list of ports."""
+    try:
+        return [int(port.strip()) for port in port_string.split(',')]
+    except ValueError as e:
+        print(Fore.RED + "Error: Ports must be a comma-separated list of integers. Example: 22,80,443" + Style.RESET_ALL)
+        log_error(f"Port parsing error: {e}")
+        exit(1)
+
+# Check `security.txt`
+def check_security_txt(domain):
+    """Check for a security.txt file on the domain."""
+    url = f"https://{domain}/.well-known/security.txt"
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()  # Raise HTTPError for bad responses
+        print(Fore.GREEN + f"Security.txt found at {url}" + Style.RESET_ALL)
+        return response.text
+    except requests.exceptions.HTTPError as e:
+        print(Fore.YELLOW + f"No security.txt found at {url} (HTTP {response.status_code})" + Style.RESET_ALL)
+        log_error(f"HTTPError fetching security.txt for {domain}: {e}")
+    except requests.exceptions.RequestException as e:
+        print(Fore.RED + f"Error fetching security.txt for {domain}: {e}" + Style.RESET_ALL)
+        log_error(f"RequestException fetching security.txt for {domain}: {e}")
+    return None
+
+def check_crowdsourced_lists(domain):
+    """Search crowdsourced lists for the domain."""
+    # Example: A list of domains that are known to have bug bounty programs
+    crowdsourced_list = ["example.com", "test.com"]  # Replace with the actual source or use a URL to fetch it
+    if domain in crowdsourced_list:
+        return Fore.GREEN + f"Found in disclose.io repository: {domain}" + Style.RESET_ALL
+    else:
+        return Fore.YELLOW + f"Domain not found in disclose.io repository: {domain}" + Style.RESET_ALL
+
+
 # Command-Line Arguments
 def parse_args():
     parser = argparse.ArgumentParser(description="DIPmap: Map domains to IPs, check scope, and perform scans.")
@@ -214,6 +268,7 @@ def parse_args():
     parser.add_argument('--quick-scan', help="Perform a quick port scan", action='store_true')
     parser.add_argument('-p', '--ports', help="Comma-separated list of ports to scan (e.g., 22,53,80)")
     parser.add_argument('-V', '--version', help="Retrieve server version information for the domain's IPs", action='store_true')
+    parser.add_argument('-CD', '--check-disclosure', help="Check if the domain has a vulnerability disclosure or bug bounty program", action='store_true')
     return parser.parse_args()
 
 def parse_custom_ports(port_string):
@@ -229,7 +284,11 @@ def main():
     args = parse_args()
     print_banner()
 
-   if args.domain and args.check_disclosure:
+    if not args.domain:
+        print(Fore.RED + "Error: Please specify a domain using the '-d' or '--domain' flag." + Style.RESET_ALL)
+        return  # Exit if no domain is provided
+
+    if args.check_disclosure:
         domain = args.domain
         print(Fore.CYAN + f"Checking disclosure policies for {domain}..." + Style.RESET_ALL)
 
@@ -247,10 +306,7 @@ def main():
         crowdsourced_result = check_crowdsourced_lists(domain)
         print(crowdsourced_result)
 
-    else:
-        print(Fore.RED + "Error: Please provide a domain with the --check-disclosure flag." + Style.RESET_ALL) 
-  
-if args.domain:
+    if args.domain:
         ip_addresses = get_ips(args.domain)
         if ip_addresses:
             print(f"IP Addresses for {args.domain}: {', '.join(ip_addresses)}")
@@ -268,6 +324,7 @@ if args.domain:
 
     if args.domain and args.scope_check:
         api_keys = load_api_keys()
+        warn_missing_api_keys(api_keys)
         platform = args.scope_check.lower()
         api_key = api_keys.get(platform)
         if api_key:
