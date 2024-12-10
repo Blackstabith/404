@@ -12,9 +12,62 @@ from colorama import Fore, Style
 # Logging configuration
 logging.basicConfig(filename="dipmap_errors.log", level=logging.ERROR, format="%(asctime)s - %(message)s")
 
+# Helper functions
+def log_error(error_message):
+    """Log errors to a file."""
+    logging.error(error_message)
+
 # Predefined port lists
 DEFAULT_PORTS = [80, 443, 8080, 8443]
 QUICK_SCAN_PORTS = [21, 22, 80, 443]
+
+# Check `security.txt`
+def check_security_txt(domain):
+    """Check for a security.txt file on the domain."""
+    url = f"https://{domain}/.well-known/security.txt"
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            print(Fore.GREEN + f"Security.txt found at {url}" + Style.RESET_ALL)
+            return response.text
+        else:
+            print(Fore.YELLOW + f"No security.txt found at {url}" + Style.RESET_ALL)
+            return None
+    except requests.exceptions.RequestException as e:
+        log_error(f"Error fetching security.txt for {domain}: {e}")
+        return None
+
+# Check bug bounty directories
+def check_bug_bounty_directories(domain):
+    """Check known bug bounty directories for the domain."""
+    results = []
+    # Example: HackerOne directory
+    hackerone_url = f"https://hackerone.com/{domain}"
+    response = requests.get(hackerone_url)
+    if response.status_code == 200:
+        results.append(Fore.GREEN + f"Found on HackerOne: {hackerone_url}" + Style.RESET_ALL)
+
+    # Example: Bugcrowd directory
+    bugcrowd_url = f"https://bugcrowd.com/{domain}"
+    response = requests.get(bugcrowd_url)
+    if response.status_code == 200:
+        results.append(Fore.GREEN + f"Found on Bugcrowd: {bugcrowd_url}" + Style.RESET_ALL)
+
+    if not results:
+        results.append(Fore.YELLOW + f"No bug bounty directories found for {domain}" + Style.RESET_ALL)
+
+    return results
+
+# Check crowdsourced lists (e.g., disclose.io)
+def check_crowdsourced_lists(domain):
+    """Search crowdsourced lists for the domain."""
+    # This example uses a local JSON file for simplicity.
+    # Replace with actual disclose.io API or external source if available.
+    crowdsourced_list = ["example.com", "test.com"]  # Example list
+    if domain in crowdsourced_list:
+        return Fore.GREEN + f"Found in disclose.io repository: {domain}" + Style.RESET_ALL
+    else:
+        return Fore.YELLOW + f"Domain not found in disclose.io repository: {domain}" + Style.RESET_ALL
 
 # Banner Display
 def print_banner():
@@ -176,7 +229,28 @@ def main():
     args = parse_args()
     print_banner()
 
-    if args.domain:
+   if args.domain and args.check_disclosure:
+        domain = args.domain
+        print(Fore.CYAN + f"Checking disclosure policies for {domain}..." + Style.RESET_ALL)
+
+        # Check `security.txt`
+        security_txt = check_security_txt(domain)
+        if security_txt:
+            print(f"Security.txt content:\n{security_txt}")
+
+        # Check bug bounty directories
+        bounty_results = check_bug_bounty_directories(domain)
+        for result in bounty_results:
+            print(result)
+
+        # Check crowdsourced lists
+        crowdsourced_result = check_crowdsourced_lists(domain)
+        print(crowdsourced_result)
+
+    else:
+        print(Fore.RED + "Error: Please provide a domain with the --check-disclosure flag." + Style.RESET_ALL) 
+  
+if args.domain:
         ip_addresses = get_ips(args.domain)
         if ip_addresses:
             print(f"IP Addresses for {args.domain}: {', '.join(ip_addresses)}")
