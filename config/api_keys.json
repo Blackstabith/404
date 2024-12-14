@@ -1,0 +1,14 @@
+{
+  "HackerOne": {
+    "api_key": "Bv7b9pwjUp16bOcXTCwJeGjYLdWfdlzmpLUlzfaUv/M="
+  },
+  "Bugcrowd": {
+    "api_key": "your_bugcrowd_api_key_here"
+  },
+  "Intigriti": {
+    "api_key": "your_intigriti_api_key_here"
+  },
+  "OtherPlatform": {
+    "api_key": "your_other_platform_api_key_here"
+  }
+}

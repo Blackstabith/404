@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+
+import argparse
+from core.geolocation import get_ip_address, get_geolocation
+from core.scope import check_scope
+from core.port_scan import scan_ports
+from core.ssl import analyze_ssl
+from core.output import display_results, display_ssl_info  # Add this import
+from core.version_scan import scan_version
+from core.util import print_banner
+
+def main():
+    # Call the banner function at the beginning
+    print_banner()
+   
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="DIPmap - Domain and IP Mapping Tool")
+    parser.add_argument("target", help="Target domain or IP address to scan")
+    parser.add_argument("--ports", nargs="*", type=int, default=[80, 443], 
+                        help="Ports to scan (default: 80, 443)")
+    parser.add_argument("-i", "--ip", action="store_true", help="Perform IP address lookup")
+    parser.add_argument("-g", "--geo", action="store_true", help="Perform geolocation lookup")
+    parser.add_argument("-p", "--portscan", action="store_true", help="Perform port scanning")
+    parser.add_argument("-s", "--ssl", action="store_true", help="Perform SSL analysis")
+    parser.add_argument("-c", "--scope", action="store_true", help="Perform scope check")
+    parser.add_argument("-v", "--version", action="store_true", help="Perform version scan")
+    args = parser.parse_args()
+    
+    target = args.target
+    ports = args.ports
+
+    # Initialize variables
+    open_ports = None
+    ssl_info = None
+    version_info = None
+     
+    # Perform version scan if requested
+    if args.version:
+        print("Scanning versions...")
+        version_info = scan_version(target, ports)
+        print("Version Information:", version_info)
+     
+    # Perform IP address lookup if requested
+    if args.ip:
+        print(f"Resolving IP address for {target}...")
+        ip_address = get_ip_address(target)
+        if isinstance(ip_address, dict) and "error" in ip_address:
+            print(ip_address["error"])
+            return
+        print(f"IP Address: {ip_address}")
+
+        # Perform geolocation if requested
+        if args.geo:
+            print("Fetching geolocation data...")
+            geo_data = get_geolocation(ip_address)
+            if "error" in geo_data:
+                print(geo_data["error"])
+            else:
+                print("Geolocation Data:", geo_data)
+
+    # Perform scope check if requested
+    if args.scope:
+        print(f"Checking if the target '{target}' is in scope...")
+        scope_status = check_scope(target)
+        print(f"Scope status: {scope_status}")
+
+    # If the user requested port scanning, run it
+    if args.portscan:
+        print("Scanning ports...")
+        open_ports = scan_ports(target, ports)
+        print(f"Open Ports: {open_ports}")
+
+    # If the user requested SSL analysis, run it
+    if args.ssl:
+        print("Analyzing SSL...")
+        ssl_info = analyze_ssl(args.target)  # Returns only ssl_info
+        display_ssl_info(ssl_info)  # Call the function to display SSL info
+        print(f"SSL Status: {ssl_info.get('error', 'SSL analysis successful')}")
+
+    # Display results only if portscan or SSL analysis was run
+    if open_ports is not None or ssl_info is not None:
+        display_results(target, open_ports, ssl_info)
+
+    # If no specific tasks were requested, run everything
+    if not any([args.ip, args.geo, args.portscan, args.ssl, args.scope]):
+        print("Running all checks...")
+        # Perform IP address lookup
+        ip_address = get_ip_address(target)
+        if isinstance(ip_address, dict) and "error" in ip_address:
+            print(ip_address["error"])
+            return
+        print(f"IP Address: {ip_address}")
+
+        # Perform geolocation if requested
+        geo_data = get_geolocation(ip_address)
+        if "error" in geo_data:
+            print(geo_data["error"])
+        else:
+            print("Geolocation Data:", geo_data)
+
+        # Check scope
+        print(f"Checking if the target '{target}' is in scope...")
+        scope_status = check_scope(target)
+        print(f"Scope status: {scope_status}")
+
+        # Port scan
+        print("Scanning ports...")
+        open_ports = scan_ports(target, ports)
+        print(f"Open Ports: {open_ports}")
+
+        # SSL analysis
+        print("Analyzing SSL...")
+        ssl_info = analyze_ssl(args.target)  # Returns only ssl_info
+        display_ssl_info(ssl_info)  # Call the function to display SSL info
+        print(f"SSL Status: {ssl_info.get('error', 'SSL analysis successful')}")
+        
+        # Handle other arguments (ip, geo, portscan, etc.)
+        if args.ip:
+            # IP lookup logic
+            pass
+
+        if args.geo:
+            # Geolocation lookup logic
+            pass
+
+        if args.portscan:
+            # Port scanning logic
+            pass
+
+        if args.ssl:
+            # SSL analysis logic
+            pass
+
+        # Display results (including version scan results)
+        display_results(target, open_ports, ssl_info, version_info)
+
+if __name__ == "__main__":
+    main()
