@@ -2,9 +2,6 @@
   "HackerOne": {
     "api_key": "your_HackerOne_api_here"
   },
-  "Bugcrowd": {
-    "api_key": "your_bugcrowd_api_key_here"
-  },
   "Intigriti": {
     "api_key": "your_intigriti_api_key_here"
   },
